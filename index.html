@@ -128,6 +128,15 @@
   tbody tr.highlighted { background: #fff8e1; }
   tbody tr.highlighted td { font-weight: 600; }
 
+  /* Back button */
+  .back-btn {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 8px 16px; background: #e8eaf6; color: #3f51b5;
+    border: none; border-radius: 8px; font-size: 14px;
+    cursor: pointer; font-weight: 500; margin-bottom: 16px;
+  }
+  .back-btn:hover { background: #c5cae9; }
+
   @media (max-width: 600px) {
     .header h1 { font-size: 20px; }
     .container { padding: 16px 10px; }
@@ -164,6 +173,9 @@
     <div class="autocomplete" id="autocomplete"></div>
   </div>
 
+  <div id="backBtnArea" style="display:none">
+    <button class="back-btn" onclick="goBack()">&#9664; 뒤로가기</button>
+  </div>
   <div id="breadcrumb" class="breadcrumb" style="display:none"></div>
   <div id="statsArea" style="display:none" class="stats"></div>
 
@@ -208,6 +220,8 @@ const introArea = document.getElementById('introArea');
 const tbody = document.getElementById('tbody');
 const thead = document.getElementById('thead');
 const breadcrumb = document.getElementById('breadcrumb');
+const backBtnArea = document.getElementById('backBtnArea');
+let viewHistory = [];
 
 // ===== INIT =====
 async function init() {
@@ -233,6 +247,8 @@ async function init() {
 async function loadDateData(date) {
   currentDate = date;
   currentView = null;
+  viewHistory = [];
+  backBtnArea.style.display = 'none';
 
   introArea.innerHTML = '<div class="loading"><div class="spinner"></div><p>' + date + ' 데이터를 불러오는 중...</p></div>';
   introArea.style.display = '';
@@ -299,7 +315,11 @@ function showStockResults(name) {
     return;
   }
 
+  if (!currentView || currentView.type !== 'stock' || currentView.name !== name) {
+    if (currentView) viewHistory.push({...currentView});
+  }
   currentView = { type: 'stock', name: name };
+  backBtnArea.style.display = viewHistory.length > 0 ? '' : 'none';
   entries.sort((a, b) => (b[2] || 0) - (a[2] || 0));
   const maxWeight = entries.reduce((m, e) => Math.max(m, e[2] || 0), 0);
 
@@ -345,7 +365,9 @@ function showEtfHoldings(etfCode, etfName) {
   }
 
   const fromStock = currentView && currentView.type === 'stock' ? currentView.name : null;
+  if (currentView) viewHistory.push({...currentView});
   currentView = { type: 'etf', code: etfCode, name: etfName, fromStock: fromStock };
+  backBtnArea.style.display = '';
 
   items.sort((a, b) => (b[1] || 0) - (a[1] || 0));
   const maxWeight = items.reduce((m, e) => Math.max(m, e[1] || 0), 0);
@@ -392,6 +414,20 @@ function showEtfHoldings(etfCode, etfName) {
 function searchComponent(name) {
   searchInput.value = name;
   showStockResults(name);
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+}
+
+function goBack() {
+  if (viewHistory.length === 0) return;
+  const prev = viewHistory.pop();
+  currentView = null; // prevent double-push
+  if (prev.type === 'stock') {
+    searchInput.value = prev.name;
+    showStockResults(prev.name);
+  } else if (prev.type === 'etf') {
+    showEtfHoldings(prev.code, prev.name);
+  }
+  backBtnArea.style.display = viewHistory.length > 0 ? '' : 'none';
   window.scrollTo({ top: 0, behavior: 'smooth' });
 }
 
