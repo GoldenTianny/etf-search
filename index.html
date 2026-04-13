@@ -1,0 +1,460 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ETF 종목 검색기</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Malgun Gothic', sans-serif;
+    background: #f0f2f5; color: #333; min-height: 100vh;
+  }
+  .header {
+    background: linear-gradient(135deg, #1a237e, #283593);
+    color: white; padding: 32px 20px 28px; text-align: center;
+  }
+  .header h1 { font-size: 26px; font-weight: 700; margin-bottom: 6px; }
+  .header p { font-size: 14px; opacity: 0.8; }
+  .container { max-width: 900px; margin: 0 auto; padding: 24px 16px; }
+
+  /* Date Selector */
+  .date-bar {
+    display: flex; align-items: center; gap: 10px;
+    margin-bottom: 16px; flex-wrap: wrap;
+  }
+  .date-bar label { font-size: 14px; font-weight: 600; color: #555; white-space: nowrap; }
+  .date-bar select {
+    padding: 10px 14px; font-size: 14px; border: 2px solid #ddd;
+    border-radius: 8px; background: white; outline: none; cursor: pointer;
+    min-width: 160px;
+  }
+  .date-bar select:focus { border-color: #3f51b5; }
+  .date-bar .date-info {
+    font-size: 13px; color: #888; margin-left: auto;
+  }
+
+  /* Search Area */
+  .search-box { position: relative; margin-bottom: 20px; }
+  .search-box input {
+    width: 100%; padding: 16px 20px 16px 48px; font-size: 16px;
+    border: 2px solid #ddd; border-radius: 12px; outline: none;
+    background: white; transition: border-color 0.2s;
+  }
+  .search-box input:focus { border-color: #3f51b5; }
+  .search-box input:disabled { background: #f5f5f5; cursor: not-allowed; }
+  .search-box .icon {
+    position: absolute; left: 16px; top: 50%;
+    transform: translateY(-50%); font-size: 20px; color: #999;
+  }
+  .autocomplete {
+    position: absolute; top: 100%; left: 0; right: 0;
+    background: white; border: 1px solid #ddd; border-radius: 8px;
+    max-height: 260px; overflow-y: auto; z-index: 100;
+    box-shadow: 0 4px 16px rgba(0,0,0,0.12); display: none;
+  }
+  .autocomplete .item {
+    padding: 10px 16px; cursor: pointer; font-size: 14px;
+    border-bottom: 1px solid #f0f0f0;
+  }
+  .autocomplete .item:hover, .autocomplete .item.active { background: #e8eaf6; }
+  .autocomplete .item .highlight { color: #1a237e; font-weight: 700; }
+
+  /* Breadcrumb */
+  .breadcrumb {
+    display: flex; align-items: center; gap: 8px;
+    margin-bottom: 16px; font-size: 14px; flex-wrap: wrap;
+  }
+  .breadcrumb a { color: #3f51b5; text-decoration: none; cursor: pointer; }
+  .breadcrumb a:hover { text-decoration: underline; }
+  .breadcrumb .sep { color: #bbb; }
+  .breadcrumb .current { color: #333; font-weight: 600; }
+
+  /* Stats */
+  .stats { display: flex; gap: 12px; margin-bottom: 20px; flex-wrap: wrap; }
+  .stat-card {
+    background: white; padding: 14px 20px; border-radius: 10px;
+    flex: 1; min-width: 140px; box-shadow: 0 1px 4px rgba(0,0,0,0.06);
+  }
+  .stat-card .label { font-size: 12px; color: #888; margin-bottom: 4px; }
+  .stat-card .value { font-size: 22px; font-weight: 700; color: #1a237e; }
+  .stat-card .value.small { font-size: 16px; }
+
+  /* Table */
+  .result-section {
+    background: white; border-radius: 12px;
+    box-shadow: 0 1px 6px rgba(0,0,0,0.08); overflow: hidden;
+  }
+  .result-header {
+    padding: 16px 20px; background: #fafafa; border-bottom: 1px solid #eee;
+    font-weight: 600; font-size: 15px;
+    display: flex; justify-content: space-between; align-items: center;
+  }
+  .result-header .sort-info { font-size: 12px; color: #888; font-weight: 400; }
+  table { width: 100%; border-collapse: collapse; }
+  thead th {
+    padding: 12px 16px; text-align: left; font-size: 12px; font-weight: 600;
+    color: #666; text-transform: uppercase; letter-spacing: 0.5px;
+    border-bottom: 2px solid #eee;
+  }
+  tbody tr { border-bottom: 1px solid #f5f5f5; transition: background 0.15s; }
+  tbody tr:hover { background: #f8f9ff; }
+  tbody tr.clickable { cursor: pointer; }
+  tbody tr.clickable:hover { background: #e8eaf6; }
+  tbody td { padding: 12px 16px; font-size: 14px; }
+  tbody td.rank { font-weight: 700; color: #1a237e; width: 50px; text-align: center; }
+  tbody td.code { color: #888; font-size: 13px; font-family: monospace; }
+  tbody td.weight { font-weight: 600; text-align: right; white-space: nowrap; }
+  tbody td.etf-link { color: #3f51b5; font-weight: 500; }
+  .weight-bar {
+    display: inline-block; height: 6px;
+    background: linear-gradient(90deg, #3f51b5, #7986cb);
+    border-radius: 3px; margin-right: 8px; vertical-align: middle;
+  }
+  .weight-bar.green { background: linear-gradient(90deg, #2e7d32, #66bb6a); }
+
+  /* States */
+  .intro { text-align: center; padding: 60px 20px; color: #999; }
+  .intro .emoji { font-size: 48px; margin-bottom: 16px; }
+  .intro p { font-size: 15px; line-height: 1.6; }
+  .loading { text-align: center; padding: 60px 20px; color: #999; }
+  .loading .spinner {
+    display: inline-block; width: 32px; height: 32px;
+    border: 3px solid #ddd; border-top-color: #3f51b5;
+    border-radius: 50%; animation: spin 0.8s linear infinite;
+    margin-bottom: 16px;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  tbody tr.highlighted { background: #fff8e1; }
+  tbody tr.highlighted td { font-weight: 600; }
+
+  @media (max-width: 600px) {
+    .header h1 { font-size: 20px; }
+    .container { padding: 16px 10px; }
+    tbody td { padding: 10px 10px; font-size: 13px; }
+    thead th { padding: 10px 10px; }
+    .stat-card .value { font-size: 18px; }
+    .stat-card .value.small { font-size: 14px; }
+    .date-bar { flex-direction: column; align-items: stretch; }
+    .date-bar .date-info { margin-left: 0; }
+  }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <h1>ETF 종목 검색기</h1>
+  <p>종목명을 입력하면 해당 종목을 보유한 ETF를 비중순으로 보여줍니다</p>
+</div>
+
+<div class="container">
+  <!-- Date selector -->
+  <div class="date-bar">
+    <label for="dateSelect">&#128197; 기준일</label>
+    <select id="dateSelect" disabled>
+      <option>불러오는 중...</option>
+    </select>
+    <span class="date-info" id="dateInfo"></span>
+  </div>
+
+  <!-- Search -->
+  <div class="search-box">
+    <span class="icon">&#128269;</span>
+    <input type="text" id="searchInput" placeholder="날짜를 먼저 선택해주세요" autocomplete="off" disabled>
+    <div class="autocomplete" id="autocomplete"></div>
+  </div>
+
+  <div id="breadcrumb" class="breadcrumb" style="display:none"></div>
+  <div id="statsArea" style="display:none" class="stats"></div>
+
+  <div class="result-section" id="resultSection">
+    <div id="introArea">
+      <div class="loading">
+        <div class="spinner"></div>
+        <p>날짜 목록을 불러오는 중...</p>
+      </div>
+    </div>
+    <div id="resultArea" style="display:none">
+      <div class="result-header">
+        <span id="resultTitle">검색 결과</span>
+        <span class="sort-info" id="sortInfo">비중(%) 기준 내림차순 정렬</span>
+      </div>
+      <table>
+        <thead id="thead"></thead>
+        <tbody id="tbody"></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<script>
+// ===== STATE =====
+let DATA = {};
+let NAMES = [];
+let HOLDINGS = {};
+let currentDate = null;
+let currentView = null;
+let acIndex = -1;
+let acFiltered = [];
+
+// ===== DOM =====
+const dateSelect = document.getElementById('dateSelect');
+const dateInfo = document.getElementById('dateInfo');
+const searchInput = document.getElementById('searchInput');
+const autocompleteEl = document.getElementById('autocomplete');
+const statsArea = document.getElementById('statsArea');
+const resultArea = document.getElementById('resultArea');
+const introArea = document.getElementById('introArea');
+const tbody = document.getElementById('tbody');
+const thead = document.getElementById('thead');
+const breadcrumb = document.getElementById('breadcrumb');
+
+// ===== INIT =====
+async function init() {
+  try {
+    const resp = await fetch('data/dates.json');
+    const dates = await resp.json();
+
+    dateSelect.innerHTML = dates.map(d =>
+      '<option value="' + d + '">' + d + '</option>'
+    ).join('');
+    dateSelect.disabled = false;
+
+    // Auto-select latest date
+    dateSelect.value = dates[dates.length - 1];
+    await loadDateData(dates[dates.length - 1]);
+  } catch (err) {
+    introArea.innerHTML = '<div class="intro"><div class="emoji">&#9888;&#65039;</div>' +
+      '<p>데이터를 불러올 수 없습니다.<br>data/ 폴더에 dates.json 파일이 있는지 확인해주세요.</p></div>';
+  }
+}
+
+// ===== Load date data =====
+async function loadDateData(date) {
+  currentDate = date;
+  currentView = null;
+
+  introArea.innerHTML = '<div class="loading"><div class="spinner"></div><p>' + date + ' 데이터를 불러오는 중...</p></div>';
+  introArea.style.display = '';
+  resultArea.style.display = 'none';
+  statsArea.style.display = 'none';
+  breadcrumb.style.display = 'none';
+  searchInput.value = '';
+  searchInput.disabled = true;
+
+  try {
+    const resp = await fetch('data/' + date + '.json');
+    const obj = await resp.json();
+
+    NAMES = obj.names;
+    DATA = obj.data;
+    HOLDINGS = obj.holdings;
+
+    dateInfo.textContent = NAMES.length.toLocaleString() + '개 종목 / ' + Object.keys(HOLDINGS).length.toLocaleString() + '개 ETF';
+
+    searchInput.disabled = false;
+    searchInput.placeholder = '종목명을 입력하세요 (예: 삼성전자, NVIDIA, SK하이닉스)';
+    searchInput.focus();
+
+    introArea.innerHTML = '<div class="intro"><div class="emoji">&#128200;</div>' +
+      '<p>위 검색창에 종목명을 입력해보세요.<br>해당 종목을 보유한 모든 ETF를 확인할 수 있습니다.</p></div>';
+  } catch (err) {
+    introArea.innerHTML = '<div class="intro"><div class="emoji">&#9888;&#65039;</div>' +
+      '<p>' + date + ' 데이터를 불러올 수 없습니다.</p></div>';
+  }
+}
+
+dateSelect.addEventListener('change', function() {
+  loadDateData(this.value);
+});
+
+// ===== UTILS =====
+function escHtml(s) {
+  if (!s) return '';
+  return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+function highlightMatch(text, query) {
+  if (!query) return escHtml(text);
+  const idx = text.toLowerCase().indexOf(query.toLowerCase());
+  if (idx === -1) return escHtml(text);
+  return escHtml(text.substring(0, idx)) +
+    '<span class="highlight">' + escHtml(text.substring(idx, idx + query.length)) + '</span>' +
+    escHtml(text.substring(idx + query.length));
+}
+
+function safeAttr(s) {
+  return s.replace(/\\/g,'\\\\').replace(/'/g,"\\'").replace(/"/g,'&quot;');
+}
+
+// ===== STOCK SEARCH VIEW =====
+function showStockResults(name) {
+  const entries = DATA[name];
+  if (!entries) {
+    introArea.innerHTML = '<div class="intro"><p>검색 결과가 없습니다.</p></div>';
+    introArea.style.display = '';
+    resultArea.style.display = 'none';
+    statsArea.style.display = 'none';
+    breadcrumb.style.display = 'none';
+    return;
+  }
+
+  currentView = { type: 'stock', name: name };
+  entries.sort((a, b) => (b[2] || 0) - (a[2] || 0));
+  const maxWeight = entries.reduce((m, e) => Math.max(m, e[2] || 0), 0);
+
+  breadcrumb.innerHTML = '<span class="current">&#128200; ' + escHtml(name) + ' 보유 ETF</span>';
+  breadcrumb.style.display = 'flex';
+
+  statsArea.innerHTML =
+    '<div class="stat-card"><div class="label">검색 종목</div><div class="value small">' + escHtml(name) + '</div></div>' +
+    '<div class="stat-card"><div class="label">보유 ETF 수</div><div class="value">' + entries.length.toLocaleString() + '</div></div>' +
+    '<div class="stat-card"><div class="label">최대 비중</div><div class="value">' + (maxWeight ? maxWeight.toFixed(2) + '%' : '-') + '</div></div>';
+  statsArea.style.display = 'flex';
+
+  thead.innerHTML = '<tr><th style="width:50px">#</th><th>ETF 종목명</th><th>ETF 코드</th><th style="text-align:right;min-width:120px">비중(%)</th></tr>';
+
+  let html = '';
+  entries.forEach((e, i) => {
+    const code = e[0] || '-';
+    const etfName = e[1];
+    const weight = e[2];
+    const barWidth = maxWeight > 0 && weight ? (weight / maxWeight * 80) : 0;
+    html += '<tr class="clickable" onclick="showEtfHoldings(\'' + safeAttr(code) + '\',\'' + safeAttr(etfName) + '\')">' +
+      '<td class="rank">' + (i + 1) + '</td>' +
+      '<td class="etf-link">' + escHtml(etfName) + '</td>' +
+      '<td class="code">' + escHtml(code) + '</td>' +
+      '<td class="weight">' +
+        (weight != null ? '<span class="weight-bar" style="width:' + barWidth + 'px"></span>' + weight.toFixed(2) + '%' : '-') +
+      '</td></tr>';
+  });
+  tbody.innerHTML = html;
+
+  document.getElementById('resultTitle').textContent = '"' + name + '" 보유 ETF (' + entries.length + '개)';
+  document.getElementById('sortInfo').textContent = '비중(%) 기준 내림차순 정렬';
+  introArea.style.display = 'none';
+  resultArea.style.display = '';
+}
+
+// ===== ETF HOLDINGS VIEW =====
+function showEtfHoldings(etfCode, etfName) {
+  const items = HOLDINGS[etfCode];
+  if (!items || items.length === 0) {
+    alert('해당 ETF의 보유내역 정보가 없습니다.');
+    return;
+  }
+
+  const fromStock = currentView && currentView.type === 'stock' ? currentView.name : null;
+  currentView = { type: 'etf', code: etfCode, name: etfName, fromStock: fromStock };
+
+  items.sort((a, b) => (b[1] || 0) - (a[1] || 0));
+  const maxWeight = items.reduce((m, e) => Math.max(m, e[1] || 0), 0);
+
+  let bc = '';
+  if (fromStock) {
+    bc += '<a onclick="showStockResults(\'' + safeAttr(fromStock) + '\')">' + escHtml(fromStock) + '</a>';
+    bc += '<span class="sep">&#9654;</span>';
+  }
+  bc += '<span class="current">&#128188; ' + escHtml(etfName) + '</span>';
+  breadcrumb.innerHTML = bc;
+  breadcrumb.style.display = 'flex';
+
+  statsArea.innerHTML =
+    '<div class="stat-card"><div class="label">ETF명</div><div class="value small">' + escHtml(etfName) + '</div></div>' +
+    '<div class="stat-card"><div class="label">ETF 코드</div><div class="value small">' + escHtml(etfCode) + '</div></div>' +
+    '<div class="stat-card"><div class="label">보유 종목 수</div><div class="value">' + items.length + '</div></div>';
+  statsArea.style.display = 'flex';
+
+  thead.innerHTML = '<tr><th style="width:50px">#</th><th>보유 종목명</th><th style="text-align:right;min-width:120px">비중(%)</th></tr>';
+
+  let html = '';
+  items.forEach((e, i) => {
+    const compName = e[0];
+    const weight = e[1];
+    const barWidth = maxWeight > 0 && weight ? (weight / maxWeight * 80) : 0;
+    const isHighlighted = fromStock && compName === fromStock;
+    const rowClass = isHighlighted ? 'highlighted clickable' : 'clickable';
+    html += '<tr class="' + rowClass + '" onclick="searchComponent(\'' + safeAttr(compName) + '\')">' +
+      '<td class="rank">' + (i + 1) + '</td>' +
+      '<td class="etf-link">' + escHtml(compName) + (isHighlighted ? ' &#11088;' : '') + '</td>' +
+      '<td class="weight">' +
+        (weight != null ? '<span class="weight-bar green" style="width:' + barWidth + 'px"></span>' + weight.toFixed(2) + '%' : '-') +
+      '</td></tr>';
+  });
+  tbody.innerHTML = html;
+
+  document.getElementById('resultTitle').textContent = escHtml(etfName) + ' 보유내역 (' + items.length + '개 종목)';
+  document.getElementById('sortInfo').textContent = '비중(%) 기준 내림차순 정렬';
+  introArea.style.display = 'none';
+  resultArea.style.display = '';
+}
+
+function searchComponent(name) {
+  searchInput.value = name;
+  showStockResults(name);
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+}
+
+// ===== AUTOCOMPLETE =====
+function updateAutocomplete() {
+  const q = searchInput.value.trim();
+  if (q.length === 0) { autocompleteEl.style.display = 'none'; acFiltered = []; acIndex = -1; return; }
+  const ql = q.toLowerCase();
+  acFiltered = NAMES.filter(n => n.toLowerCase().includes(ql)).slice(0, 50);
+  acIndex = -1;
+  if (acFiltered.length === 0) { autocompleteEl.style.display = 'none'; return; }
+  autocompleteEl.innerHTML = acFiltered.map((n, i) =>
+    '<div class="item" data-idx="' + i + '">' + highlightMatch(n, q) + '</div>'
+  ).join('');
+  autocompleteEl.style.display = 'block';
+  autocompleteEl.querySelectorAll('.item').forEach(el => {
+    el.addEventListener('mousedown', function(e) {
+      e.preventDefault();
+      selectItem(parseInt(this.dataset.idx));
+    });
+  });
+}
+
+function selectItem(idx) {
+  if (idx < 0 || idx >= acFiltered.length) return;
+  const name = acFiltered[idx];
+  searchInput.value = name;
+  autocompleteEl.style.display = 'none';
+  showStockResults(name);
+}
+
+function highlightItem(idx) {
+  const items = autocompleteEl.querySelectorAll('.item');
+  items.forEach(el => el.classList.remove('active'));
+  if (idx >= 0 && idx < items.length) {
+    items[idx].classList.add('active');
+    items[idx].scrollIntoView({ block: 'nearest' });
+  }
+}
+
+searchInput.addEventListener('input', updateAutocomplete);
+searchInput.addEventListener('keydown', function(e) {
+  if (autocompleteEl.style.display === 'none' || acFiltered.length === 0) {
+    if (e.key === 'Enter') {
+      const q = searchInput.value.trim();
+      if (DATA[q]) showStockResults(q);
+      else {
+        const match = NAMES.find(n => n.toLowerCase() === q.toLowerCase());
+        if (match) { searchInput.value = match; showStockResults(match); }
+      }
+    }
+    return;
+  }
+  if (e.key === 'ArrowDown') { e.preventDefault(); acIndex = Math.min(acIndex + 1, acFiltered.length - 1); highlightItem(acIndex); }
+  else if (e.key === 'ArrowUp') { e.preventDefault(); acIndex = Math.max(acIndex - 1, 0); highlightItem(acIndex); }
+  else if (e.key === 'Enter') { e.preventDefault(); if (acIndex >= 0) selectItem(acIndex); else if (acFiltered.length > 0) selectItem(0); }
+  else if (e.key === 'Escape') { autocompleteEl.style.display = 'none'; }
+});
+searchInput.addEventListener('blur', function() { setTimeout(() => { autocompleteEl.style.display = 'none'; }, 150); });
+searchInput.addEventListener('focus', function() { if (searchInput.value.trim().length > 0) updateAutocomplete(); });
+
+// ===== START =====
+init();
+</script>
+</body>
+</html>
