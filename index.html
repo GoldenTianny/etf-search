@@ -624,10 +624,17 @@ function goBack() {
   const prev = viewHistory.pop();
   currentView = null; // prevent double-push
   if (prev.type === 'stock') {
-    searchInput.value = prev.name;
+    selectedStocks = [prev.name];
+    searchInput.value = '';
+    renderTags();
     showStockResults(prev.name);
   } else if (prev.type === 'etf') {
     showEtfHoldings(prev.code, prev.name);
+  } else if (prev.type === 'multi') {
+    selectedStocks = [...prev.names];
+    searchInput.value = '';
+    renderTags();
+    showMultiStockResults();
   }
   backBtnArea.style.display = viewHistory.length > 0 ? '' : 'none';
   window.scrollTo({ top: 0, behavior: 'smooth' });
