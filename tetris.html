@@ -1,0 +1,658 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<style>body{margin:0}:root{padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px);box-sizing:border-box}</style>
+<title>느긋한 테트리스</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Black+Han+Sans&family=Noto+Sans+KR:wght@500;700&display=swap">
+<style>
+/* Layout: one-screen game. Phone = stats bar / board / big control pad stacked. Desktop = board left, stats + pad in a side column. */
+:root {
+  --bg: #E8EDF1;
+  --surface: #FFFFFF;
+  --ink: #18222D;
+  --muted: #556677;
+  --line: #C7D1DA;
+  --accent: #2457C5;
+  --accent-ink: #FFFFFF;
+  --well: #18222D;
+  --well-grid: rgba(255,255,255,0.06);
+  --btn: #FFFFFF;
+  --btn-press: #DCE4EC;
+  --scrim: rgba(232,237,241,0.86);
+  --display: "Black Han Sans", "Noto Sans KR", "Apple SD Gothic Neo", "Malgun Gothic", sans-serif;
+  --body: "Noto Sans KR", "Apple SD Gothic Neo", "Malgun Gothic", system-ui, sans-serif;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0F151C; --surface: #18212B; --ink: #E6EDF3; --muted: #93A3B3; --line: #2C3846;
+    --accent: #7FA3FF; --accent-ink: #0F151C; --well: #0A0F14; --well-grid: rgba(255,255,255,0.05);
+    --btn: #1E2833; --btn-press: #2A3644; --scrim: rgba(15,21,28,0.86);
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0F151C; --surface: #18212B; --ink: #E6EDF3; --muted: #93A3B3; --line: #2C3846;
+  --accent: #7FA3FF; --accent-ink: #0F151C; --well: #0A0F14; --well-grid: rgba(255,255,255,0.05);
+  --btn: #1E2833; --btn-press: #2A3644; --scrim: rgba(15,21,28,0.86);
+  color-scheme: dark;
+}
+
+html, body { height: 100%; }
+body {
+  background: var(--bg); color: var(--ink);
+  font-family: var(--body); font-size: 18px; line-height: 1.5;
+  -webkit-tap-highlight-color: transparent;
+  overflow: hidden;
+}
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+button { font: inherit; color: inherit; }
+button:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+
+.app {
+  height: 100%; max-width: 560px; margin: 0 auto;
+  padding-block: 12px; padding-inline: 16px;
+  display: grid; gap: 12px;
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  grid-template-areas: "top" "stage" "pad";
+}
+
+/* Stats bar */
+.top {
+  grid-area: top;
+  display: flex; align-items: center; gap: 12px;
+  background: var(--surface); border: 1px solid var(--line); border-radius: 14px;
+  padding: 8px 10px 8px 14px;
+}
+.stats { display: flex; gap: 16px; flex: 1; min-width: 0; }
+.stat { display: flex; flex-direction: column; min-width: 0; }
+.stat .label { font-size: 13px; color: var(--muted); letter-spacing: 0.04em; }
+.stat .value { font-family: var(--display); font-size: 24px; line-height: 1.1; font-variant-numeric: tabular-nums; }
+.next { display: flex; flex-direction: column; align-items: center; }
+.next .label { font-size: 13px; color: var(--muted); }
+#nextCanvas { width: 52px; height: 36px; display: block; }
+.icon-btn {
+  width: 48px; height: 48px; flex: none;
+  border: 1px solid var(--line); border-radius: 12px; background: var(--btn);
+  display: grid; place-items: center; cursor: pointer; touch-action: manipulation;
+}
+.icon-btn:active { background: var(--btn-press); }
+.icon-btn svg { width: 22px; height: 22px; fill: var(--ink); }
+
+/* Board */
+.stage { grid-area: stage; position: relative; min-height: 0; }
+#board {
+  position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);
+  display: block; border-radius: 10px;
+  box-shadow: 0 0 0 4px var(--surface), 0 0 0 5px var(--line);
+}
+.toast {
+  position: absolute; left: 50%; top: 38%; transform: translate(-50%, -50%);
+  background: var(--accent); color: var(--accent-ink);
+  font-family: var(--display); font-size: 26px; letter-spacing: 0.02em;
+  padding: 10px 22px; border-radius: 999px; white-space: nowrap;
+  pointer-events: none; animation: pop 1.3s ease-out forwards;
+}
+@keyframes pop {
+  0% { opacity: 0; transform: translate(-50%, -30%) scale(0.9); }
+  15% { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+  75% { opacity: 1; }
+  100% { opacity: 0; transform: translate(-50%, -70%); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .toast { animation: fade 1.3s linear forwards; }
+  @keyframes fade { 0%, 80% { opacity: 1; } 100% { opacity: 0; } }
+}
+
+/* Start / pause / game-over panel */
+.overlay {
+  position: absolute; inset: 0; z-index: 2;
+  display: grid; place-items: center; padding: 8px;
+  background: var(--scrim); border-radius: 14px;
+  overflow-y: auto;
+}
+.panel {
+  width: 100%; max-width: 380px;
+  background: var(--surface); border: 1px solid var(--line); border-radius: 18px;
+  padding: 20px; display: flex; flex-direction: column; gap: 14px;
+}
+.panel h2 { margin: 0; font-family: var(--display); font-weight: 400; font-size: 30px; line-height: 1.15; text-wrap: balance; }
+.panel p { margin: 0; color: var(--muted); font-size: 17px; }
+.result { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.result div { background: var(--bg); border-radius: 12px; padding: 8px 10px; }
+.result .label { font-size: 13px; color: var(--muted); white-space: nowrap; }
+.result .value { font-family: var(--display); font-size: 24px; font-variant-numeric: tabular-nums; }
+.record { color: var(--accent); font-weight: 700; }
+.field-label { font-size: 15px; font-weight: 700; margin-bottom: 6px; }
+.seg { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+.seg button, .toggle {
+  min-height: 52px; border: 2px solid var(--line); border-radius: 12px;
+  background: var(--btn); cursor: pointer; font-weight: 700; font-size: 17px; touch-action: manipulation;
+}
+.seg button[aria-pressed="true"] { border-color: var(--accent); background: var(--accent); color: var(--accent-ink); }
+.toggle { width: 100%; text-align: left; padding: 0 14px; display: flex; justify-content: space-between; align-items: center; }
+.toggle .state { color: var(--muted); font-weight: 500; }
+.toggle[aria-pressed="true"] .state { color: var(--accent); font-weight: 700; }
+.primary, .secondary {
+  min-height: 60px; border-radius: 14px; cursor: pointer; font-size: 20px; font-weight: 700; touch-action: manipulation;
+}
+.primary { background: var(--accent); color: var(--accent-ink); border: none; }
+.secondary { background: var(--btn); border: 2px solid var(--line); }
+.how { margin: 0; padding: 0; list-style: none; display: grid; gap: 4px; font-size: 15px; color: var(--muted); }
+.how b { color: var(--ink); }
+
+/* Control pad */
+.pad { grid-area: pad; display: grid; grid-template-columns: repeat(6, 1fr); gap: 8px; }
+.pad button {
+  min-height: 60px; grid-column: span 2;
+  border: 1px solid var(--line); border-bottom-width: 3px; border-radius: 14px;
+  background: var(--btn); cursor: pointer;
+  display: flex; align-items: center; justify-content: center; gap: 8px;
+  font-size: 17px; font-weight: 700; white-space: nowrap;
+  touch-action: manipulation; user-select: none; -webkit-user-select: none;
+}
+.pad button.half { grid-column: span 3; }
+.pad button:active, .pad button.held { background: var(--btn-press); transform: translateY(1px); }
+.pad svg { width: 24px; height: 24px; fill: var(--ink); flex: none; }
+.pad .drop { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+.pad .drop svg { fill: var(--accent-ink); }
+.pad .drop:active, .pad .drop.held { background: var(--accent); filter: brightness(0.9); }
+
+.keys { display: none; }
+
+@media (max-width: 380px) {
+  .stats { gap: 10px; }
+  .stat .value { font-size: 20px; }
+  .pad button { font-size: 15px; gap: 4px; }
+}
+@media (min-width: 760px) and (min-height: 520px) {
+  .app {
+    max-width: 900px;
+    grid-template-columns: minmax(0, 1fr) 340px;
+    grid-template-rows: auto 1fr auto;
+    grid-template-areas: "stage top" "stage keys" "stage pad";
+    gap: 16px 24px;
+  }
+  .top { flex-wrap: wrap; padding: 16px; }
+  .stats { flex-direction: column; gap: 10px; }
+  .stat .value { font-size: 30px; }
+  .pad button { font-size: 16px; gap: 6px; padding-inline: 4px; }
+  #nextCanvas { width: 88px; height: 60px; }
+  .keys { display: block; grid-area: keys; align-self: start; font-size: 15px; color: var(--muted); }
+  .keys ul { margin: 6px 0 0; padding: 0; list-style: none; display: grid; gap: 4px; }
+  .keys kbd {
+    font-family: var(--body); font-size: 13px; font-weight: 700; color: var(--ink);
+    border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 6px; padding: 1px 7px; background: var(--btn);
+  }
+}
+</style>
+</head>
+<body>
+
+<main class="app">
+  <section class="top" aria-label="점수판">
+    <div class="stats">
+      <div class="stat"><span class="label">점수</span><span class="value" id="score">0</span></div>
+      <div class="stat"><span class="label">지운 줄</span><span class="value" id="lines">0</span></div>
+      <div class="stat"><span class="label">단계</span><span class="value" id="level">1</span></div>
+    </div>
+    <div class="next"><span class="label">다음</span><canvas id="nextCanvas" aria-label="다음 블록"></canvas></div>
+    <button class="icon-btn" id="pauseBtn" aria-label="잠시 쉬기">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="6" y="5" width="4" height="14" rx="1"/><rect x="14" y="5" width="4" height="14" rx="1"/></svg>
+    </button>
+  </section>
+
+  <section class="stage" id="stage">
+    <canvas id="board" aria-label="테트리스 판"></canvas>
+    <div id="toastHost" aria-live="polite"></div>
+    <div class="overlay" id="overlay">
+      <div class="panel" role="dialog" aria-labelledby="panelTitle">
+        <h2 id="panelTitle">느긋한 테트리스</h2>
+        <p id="panelMsg">블록을 돌리고 옮겨서 가로 한 줄을 빈틈없이 채우면 그 줄이 사라져요.</p>
+        <div class="result" id="result" hidden>
+          <div><div class="label">점수</div><div class="value" id="rScore">0</div></div>
+          <div><div class="label">지운 줄</div><div class="value" id="rLines">0</div></div>
+          <div><div class="label">최고 점수</div><div class="value" id="rBest">0</div></div>
+        </div>
+        <p class="record" id="record" hidden>새 최고 기록이에요!</p>
+        <div id="speedBox">
+          <div class="field-label" id="speedLabel">떨어지는 속도</div>
+          <div class="seg" role="group" aria-labelledby="speedLabel">
+            <button id="speed-slow" data-speed="slow">천천히</button>
+            <button id="speed-normal" data-speed="normal">보통</button>
+            <button id="speed-fast" data-speed="fast">빠르게</button>
+          </div>
+        </div>
+        <button class="toggle" id="soundBtn" aria-pressed="false">효과음 <span class="state">꺼짐</span></button>
+        <button class="primary" id="resumeBtn" hidden>계속하기</button>
+        <button class="primary" id="startBtn">시작하기</button>
+        <ul class="how" id="how">
+          <li><b>왼쪽·오른쪽</b> 버튼으로 블록을 옮겨요.</li>
+          <li><b>돌리기</b>로 블록 모양을 바꿔요.</li>
+          <li><b>바로 놓기</b>를 누르면 블록이 맨 아래로 내려가요.</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <aside class="keys" aria-label="키보드 사용법">
+    키보드로도 할 수 있어요.
+    <ul>
+      <li><kbd>←</kbd> <kbd>→</kbd> 옮기기</li>
+      <li><kbd>↑</kbd> 돌리기</li>
+      <li><kbd>↓</kbd> 한 칸 내리기</li>
+      <li><kbd>스페이스</kbd> 바로 놓기</li>
+      <li><kbd>P</kbd> 잠시 쉬기</li>
+    </ul>
+  </aside>
+
+  <section class="pad" aria-label="조작 버튼">
+    <button data-act="left" data-repeat="110" aria-label="왼쪽으로 옮기기">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15.5 4.5 7 12l8.5 7.5z"/></svg>왼쪽
+    </button>
+    <button data-act="rotate" aria-label="돌리기">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4a8 8 0 1 0 7.75 10h-2.1A6 6 0 1 1 12 6c1.6 0 3.06.63 4.13 1.66L13 11h7V4l-2.45 2.45A7.96 7.96 0 0 0 12 4z"/></svg>돌리기
+    </button>
+    <button data-act="right" data-repeat="110" aria-label="오른쪽으로 옮기기">오른쪽
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8.5 4.5 17 12l-8.5 7.5z"/></svg>
+    </button>
+    <button class="half" data-act="down" data-repeat="60" aria-label="한 칸 내리기">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4.5 8.5 12 17l7.5-8.5z"/></svg>내리기
+    </button>
+    <button class="half drop" data-act="drop" aria-label="바로 놓기">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 5.5 12 13l7-7.5zM5 17h14v2.5H5z"/></svg>바로 놓기
+    </button>
+  </section>
+</main>
+
+<script>
+(function () {
+  const COLS = 10, ROWS = 20;
+  const SHAPES = {
+    I: [[0,0,0,0],[1,1,1,1],[0,0,0,0],[0,0,0,0]],
+    O: [[1,1],[1,1]],
+    T: [[0,1,0],[1,1,1],[0,0,0]],
+    S: [[0,1,1],[1,1,0],[0,0,0]],
+    Z: [[1,1,0],[0,1,1],[0,0,0]],
+    J: [[1,0,0],[1,1,1],[0,0,0]],
+    L: [[0,0,1],[1,1,1],[0,0,0]]
+  };
+  // Blocks sit on a dark well in both themes, so one set of colors works everywhere.
+  const COLORS = { I: "#3EC8DB", O: "#F2C230", T: "#A66BEA", S: "#52C15A", Z: "#EC5A5F", J: "#4C86EA", L: "#F5922E" };
+  const SPEEDS = { slow: 1100, normal: 750, fast: 450 };
+  const CLEAR_WORDS = ["", "한 줄 완성!", "두 줄 한꺼번에!", "세 줄! 멋져요", "네 줄! 최고예요"];
+  const LINE_POINTS = [0, 100, 300, 500, 800];
+
+  const $ = (id) => document.getElementById(id);
+  const stage = $("stage"), board = $("board"), ctx = board.getContext("2d");
+  const nextCanvas = $("nextCanvas"), nctx = nextCanvas.getContext("2d");
+  const overlay = $("overlay");
+
+  const store = {
+    get(k, d) { try { const v = localStorage.getItem(k); return v === null ? d : JSON.parse(v); } catch (e) { return d; } },
+    set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} }
+  };
+
+  let S; // game state
+  let cell = 20, dpr = 1, acc = 0, last = 0, clearing = null, mode = "start", soundOn = false, audio = null;
+
+  function emptyGrid() { return Array.from({ length: ROWS }, () => Array(COLS).fill(null)); }
+  function clone(m) { return m.map((r) => r.slice()); }
+  function rotateCW(m) { const n = m.length; return m.map((_, i) => m.map((__, j) => m[n - 1 - j][i])); }
+
+  function fromBag() {
+    if (!S.bag.length) {
+      const b = Object.keys(SHAPES);
+      for (let i = b.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [b[i], b[j]] = [b[j], b[i]]; }
+      S.bag = b;
+    }
+    return S.bag.pop();
+  }
+
+  function newState(speedKey) {
+    return { grid: emptyGrid(), cur: null, next: null, bag: [], score: 0, lines: 0, level: 1,
+             speedKey: speedKey || "slow", started: false, over: false };
+  }
+
+  function collide(m, x, y) {
+    for (let r = 0; r < m.length; r++) for (let c = 0; c < m[r].length; c++) {
+      if (!m[r][c]) continue;
+      const nx = x + c, ny = y + r;
+      if (nx < 0 || nx >= COLS || ny >= ROWS) return true;
+      if (ny >= 0 && S.grid[ny][nx]) return true;
+    }
+    return false;
+  }
+
+  function spawn() {
+    const type = S.next || fromBag();
+    S.next = fromBag();
+    const m = clone(SHAPES[type]);
+    S.cur = { type, m, x: Math.floor((COLS - m.length) / 2), y: type === "I" ? -1 : 0 };
+    if (collide(S.cur.m, S.cur.x, S.cur.y)) gameOver();
+    acc = 0;
+    updateStats();
+  }
+
+  const running = () => S.started && !S.over && mode === "play";
+  const canAct = () => running() && !clearing && S.cur;
+
+  function move(dx) { if (canAct() && !collide(S.cur.m, S.cur.x + dx, S.cur.y)) S.cur.x += dx; }
+  function rotate() {
+    if (!canAct()) return;
+    const m = rotateCW(S.cur.m);
+    for (const [dx, dy] of [[0,0],[-1,0],[1,0],[-2,0],[2,0],[0,-1]]) {
+      if (!collide(m, S.cur.x + dx, S.cur.y + dy)) { S.cur.m = m; S.cur.x += dx; S.cur.y += dy; return; }
+    }
+  }
+  function softDrop() {
+    if (!canAct()) return;
+    if (!collide(S.cur.m, S.cur.x, S.cur.y + 1)) { S.cur.y++; S.score += 1; acc = 0; updateStats(); }
+    else lock();
+  }
+  function hardDrop() {
+    if (!canAct()) return;
+    let d = 0;
+    while (!collide(S.cur.m, S.cur.x, S.cur.y + 1)) { S.cur.y++; d++; }
+    S.score += d * 2;
+    lock();
+  }
+  function stepDown() {
+    if (!collide(S.cur.m, S.cur.x, S.cur.y + 1)) S.cur.y++;
+    else lock();
+  }
+
+  function lock() {
+    const { m, x, y, type } = S.cur;
+    let topOut = false;
+    for (let r = 0; r < m.length; r++) for (let c = 0; c < m[r].length; c++) {
+      if (!m[r][c]) continue;
+      if (y + r < 0) topOut = true; else S.grid[y + r][x + c] = type;
+    }
+    S.cur = null;
+    if (topOut) { gameOver(); return; }
+    const full = [];
+    S.grid.forEach((row, i) => { if (row.every(Boolean)) full.push(i); });
+    if (full.length) {
+      const before = S.level;
+      S.score += LINE_POINTS[full.length] * S.level;
+      S.lines += full.length;
+      S.level = 1 + Math.floor(S.lines / 10);
+      clearing = { rows: full, t0: performance.now() };
+      toast(S.level > before ? "다음 단계로!" : CLEAR_WORDS[full.length]);
+      chime(full.length);
+      updateStats();
+    } else spawn();
+  }
+
+  function finishClear() {
+    const rows = clearing.rows;
+    S.grid = S.grid.filter((_, i) => !rows.includes(i));
+    while (S.grid.length < ROWS) S.grid.unshift(Array(COLS).fill(null));
+    clearing = null;
+    spawn();
+  }
+
+  function interval() { return Math.max(140, SPEEDS[S.speedKey] * Math.pow(0.88, S.level - 1)); }
+
+  // ---------- drawing ----------
+  function token(name) { return getComputedStyle(document.documentElement).getPropertyValue(name).trim(); }
+
+  function drawCell(g, x, y, size, color, alpha) {
+    const p = Math.max(1, Math.round(size * 0.06)), r = Math.max(2, size * 0.18);
+    g.globalAlpha = alpha == null ? 1 : alpha;
+    g.fillStyle = color;
+    g.beginPath(); g.roundRect(x + p, y + p, size - 2 * p, size - 2 * p, r); g.fill();
+    g.fillStyle = "rgba(255,255,255,0.28)";
+    g.beginPath(); g.roundRect(x + p * 2, y + p * 2, size - 4 * p, (size - 4 * p) * 0.32, r * 0.6); g.fill();
+    g.globalAlpha = 1;
+  }
+
+  function ghostY() {
+    let gy = S.cur.y;
+    while (!collide(S.cur.m, S.cur.x, gy + 1)) gy++;
+    return gy;
+  }
+
+  function draw() {
+    const w = COLS * cell, h = ROWS * cell;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.fillStyle = token("--well");
+    ctx.fillRect(0, 0, w, h);
+    ctx.strokeStyle = token("--well-grid"); ctx.lineWidth = 1;
+    ctx.beginPath();
+    for (let c = 1; c < COLS; c++) { ctx.moveTo(c * cell + 0.5, 0); ctx.lineTo(c * cell + 0.5, h); }
+    for (let r = 1; r < ROWS; r++) { ctx.moveTo(0, r * cell + 0.5); ctx.lineTo(w, r * cell + 0.5); }
+    ctx.stroke();
+
+    const flash = clearing ? clearing.rows : [];
+    for (let r = 0; r < ROWS; r++) for (let c = 0; c < COLS; c++) {
+      const t = S.grid[r][c];
+      if (!t) continue;
+      drawCell(ctx, c * cell, r * cell, cell, flash.includes(r) ? "#FFFFFF" : COLORS[t]);
+    }
+    if (S.cur && S.started) {
+      const { m, x, y, type } = S.cur, gy = ghostY();
+      for (let r = 0; r < m.length; r++) for (let c = 0; c < m[r].length; c++) {
+        if (!m[r][c]) continue;
+        if (gy + r >= 0 && gy !== y) {
+          ctx.strokeStyle = COLORS[type]; ctx.globalAlpha = 0.55; ctx.lineWidth = 2;
+          ctx.beginPath(); ctx.roundRect(x * cell + c * cell + 3, (gy + r) * cell + 3, cell - 6, cell - 6, cell * 0.16); ctx.stroke();
+          ctx.globalAlpha = 1;
+        }
+      }
+      for (let r = 0; r < m.length; r++) for (let c = 0; c < m[r].length; c++) {
+        if (m[r][c] && y + r >= 0) drawCell(ctx, (x + c) * cell, (y + r) * cell, cell, COLORS[type]);
+      }
+    }
+  }
+
+  function drawNext() {
+    const cw = nextCanvas.clientWidth, ch = nextCanvas.clientHeight;
+    nextCanvas.width = cw * dpr; nextCanvas.height = ch * dpr;
+    nctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    nctx.clearRect(0, 0, cw, ch);
+    if (!S.next) return;
+    const m = SHAPES[S.next];
+    const cells = [];
+    m.forEach((row, r) => row.forEach((v, c) => { if (v) cells.push([r, c]); }));
+    const minR = Math.min(...cells.map((p) => p[0])), maxR = Math.max(...cells.map((p) => p[0]));
+    const minC = Math.min(...cells.map((p) => p[1])), maxC = Math.max(...cells.map((p) => p[1]));
+    const bw = maxC - minC + 1, bh = maxR - minR + 1;
+    const size = Math.floor(Math.min(cw / 4, ch / 2.4));
+    const ox = (cw - bw * size) / 2, oy = (ch - bh * size) / 2;
+    cells.forEach(([r, c]) => drawCell(nctx, ox + (c - minC) * size, oy + (r - minR) * size, size, COLORS[S.next]));
+  }
+
+  function fit() {
+    const r = stage.getBoundingClientRect();
+    cell = Math.max(12, Math.floor(Math.min((r.width - 10) / COLS, (r.height - 10) / ROWS)));
+    dpr = window.devicePixelRatio || 1;
+    board.style.width = COLS * cell + "px"; board.style.height = ROWS * cell + "px";
+    board.width = COLS * cell * dpr; board.height = ROWS * cell * dpr;
+    draw(); drawNext();
+  }
+
+  // ---------- UI ----------
+  function updateStats() {
+    $("score").textContent = S.score.toLocaleString("ko-KR");
+    $("lines").textContent = S.lines;
+    $("level").textContent = S.level;
+    drawNext();
+  }
+
+  function toast(text) {
+    const host = $("toastHost");
+    host.innerHTML = "";
+    const t = document.createElement("div");
+    t.className = "toast"; t.textContent = text;
+    host.appendChild(t);
+    setTimeout(() => { if (t.parentNode) t.remove(); }, 1400);
+  }
+
+  function setSpeed(key) {
+    S.speedKey = key;
+    store.set("gentle-tetris-speed", key);
+    document.querySelectorAll("[data-speed]").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.speed === key)));
+  }
+
+  function showPanel(kind) {
+    mode = kind;
+    overlay.hidden = kind === "play";
+    const best = store.get("gentle-tetris-best", 0);
+    if (kind === "start") {
+      $("panelTitle").textContent = "느긋한 테트리스";
+      $("panelMsg").textContent = "블록을 돌리고 옮겨서 가로 한 줄을 빈틈없이 채우면 그 줄이 사라져요.";
+      $("result").hidden = true; $("record").hidden = true; $("speedBox").hidden = false; $("how").hidden = false;
+      $("resumeBtn").hidden = true; $("startBtn").hidden = false; $("startBtn").className = "primary"; $("startBtn").textContent = "시작하기";
+    } else if (kind === "pause") {
+      $("panelTitle").textContent = "잠시 쉬어가요";
+      $("panelMsg").textContent = "준비되시면 계속하기를 눌러 주세요.";
+      $("result").hidden = true; $("record").hidden = true; $("speedBox").hidden = true; $("how").hidden = false;
+      $("resumeBtn").hidden = false; $("startBtn").hidden = false; $("startBtn").className = "secondary"; $("startBtn").textContent = "처음부터 다시";
+    } else if (kind === "over") {
+      const n = S.lines;
+      $("panelTitle").textContent = "수고하셨어요!";
+      $("panelMsg").textContent = n === 0 ? "처음엔 누구나 어려워요. 한 번 더 해 볼까요?"
+        : n < 5 ? "좋아요! 감이 잡히고 있어요."
+        : n < 15 ? "아주 잘하셨어요! 집중력이 좋으세요."
+        : "대단해요! 정말 훌륭한 솜씨예요.";
+      $("rScore").textContent = S.score.toLocaleString("ko-KR");
+      $("rLines").textContent = n;
+      $("rBest").textContent = best.toLocaleString("ko-KR");
+      $("result").hidden = false; $("speedBox").hidden = false; $("how").hidden = true;
+      $("resumeBtn").hidden = true; $("startBtn").hidden = false; $("startBtn").className = "primary"; $("startBtn").textContent = "한 판 더 하기";
+    }
+    if (kind !== "play") {
+      const focusEl = kind === "pause" ? $("resumeBtn") : $("startBtn");
+      setTimeout(() => focusEl.focus({ preventScroll: true }), 0);
+    }
+  }
+
+  function startGame() {
+    const speed = S.speedKey;
+    S = newState(speed);
+    clearing = null;
+    S.started = true;
+    spawn();
+    showPanel("play");
+    updateStats();
+  }
+
+  function gameOver() {
+    S.over = true;
+    const best = store.get("gentle-tetris-best", 0);
+    const isRecord = S.score > best && S.score > 0;
+    if (isRecord) store.set("gentle-tetris-best", S.score);
+    showPanel("over");
+    $("record").hidden = !isRecord;
+    if (isRecord) $("rBest").textContent = S.score.toLocaleString("ko-KR");
+    tone([392, 330, 262], 0.16);
+  }
+
+  function pause() { if (running()) showPanel("pause"); }
+  function resume() { if (S.started && !S.over) { acc = 0; showPanel("play"); } }
+
+  // ---------- sound (off until the player turns it on) ----------
+  function tone(freqs, step) {
+    if (!soundOn || !audio) return;
+    const now = audio.currentTime;
+    freqs.forEach((f, i) => {
+      const o = audio.createOscillator(), g = audio.createGain();
+      o.type = "sine"; o.frequency.value = f;
+      g.gain.setValueAtTime(0.0001, now + i * step);
+      g.gain.exponentialRampToValueAtTime(0.18, now + i * step + 0.02);
+      g.gain.exponentialRampToValueAtTime(0.0001, now + i * step + step + 0.15);
+      o.connect(g).connect(audio.destination);
+      o.start(now + i * step); o.stop(now + i * step + step + 0.2);
+    });
+  }
+  function chime(n) { tone([523, 659, 784, 1047].slice(0, Math.max(2, n + 1)), 0.09); }
+  function setSound(on) {
+    soundOn = on;
+    if (on && !audio) { try { audio = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) { soundOn = false; } }
+    if (audio && audio.state === "suspended") audio.resume();
+    $("soundBtn").setAttribute("aria-pressed", String(soundOn));
+    $("soundBtn").querySelector(".state").textContent = soundOn ? "켜짐" : "꺼짐";
+    store.set("gentle-tetris-sound", soundOn);
+  }
+
+  // ---------- input ----------
+  const ACTIONS = { left: () => move(-1), right: () => move(1), rotate, down: softDrop, drop: hardDrop };
+
+  document.querySelectorAll(".pad button").forEach((btn) => {
+    let delay = null, rep = null;
+    const stop = () => { clearTimeout(delay); clearInterval(rep); delay = rep = null; btn.classList.remove("held"); };
+    btn.addEventListener("pointerdown", (e) => {
+      e.preventDefault();
+      btn.classList.add("held");
+      ACTIONS[btn.dataset.act]();
+      const every = Number(btn.dataset.repeat);
+      if (every) delay = setTimeout(() => { rep = setInterval(() => ACTIONS[btn.dataset.act](), every); }, 260);
+    });
+    ["pointerup", "pointerleave", "pointercancel"].forEach((ev) => btn.addEventListener(ev, stop));
+    btn.addEventListener("click", (e) => { if (e.detail === 0) ACTIONS[btn.dataset.act](); }); // keyboard activation
+    btn.addEventListener("contextmenu", (e) => e.preventDefault());
+  });
+
+  document.addEventListener("keydown", (e) => {
+    const k = e.key;
+    if (k === "p" || k === "P" || k === "Escape") { e.preventDefault(); mode === "pause" ? resume() : pause(); return; }
+    if (mode !== "play") return;
+    const map = { ArrowLeft: "left", ArrowRight: "right", ArrowUp: "rotate", x: "rotate", X: "rotate", ArrowDown: "down", " ": "drop" };
+    if (map[k]) { e.preventDefault(); if (k === " " && e.repeat) return; ACTIONS[map[k]](); }
+  });
+
+  $("pauseBtn").addEventListener("click", () => { mode === "pause" ? resume() : pause(); });
+  $("resumeBtn").addEventListener("click", resume);
+  $("startBtn").addEventListener("click", startGame);
+  $("soundBtn").addEventListener("click", () => setSound(!soundOn));
+  document.querySelectorAll("[data-speed]").forEach((b) => b.addEventListener("click", () => setSpeed(b.dataset.speed)));
+  document.addEventListener("visibilitychange", () => { if (document.hidden) pause(); });
+
+  // ---------- loop ----------
+  function frame(t) {
+    const dt = last ? Math.min(t - last, 100) : 0;
+    last = t;
+    if (running()) {
+      if (clearing) { if (t - clearing.t0 > 300) finishClear(); }
+      else if (S.cur) { acc += dt; if (acc >= interval()) { acc = 0; stepDown(); } }
+    }
+    draw();
+    requestAnimationFrame(frame);
+  }
+
+  // ---------- boot (keeps a game in progress across page updates) ----------
+  function boot(data) {
+    S = newState(store.get("gentle-tetris-speed", "slow"));
+    if (data && data.S && data.S.started && !data.S.over) {
+      S = data.S;
+      if (data.clearing) { clearing = null; S.grid = S.grid.filter((row) => !row.every(Boolean)); while (S.grid.length < ROWS) S.grid.unshift(Array(COLS).fill(null)); }
+      if (!S.cur) spawn();
+      setSpeed(S.speedKey);
+      showPanel("pause");
+    } else {
+      setSpeed(S.speedKey);
+      showPanel("start");
+    }
+    soundOn = false;
+    $("soundBtn").setAttribute("aria-pressed", "false");
+    updateStats();
+    if (window.ResizeObserver) new ResizeObserver(fit).observe(stage);
+    window.addEventListener("resize", fit);
+    window.matchMedia("(prefers-color-scheme: dark)").addEventListener?.("change", draw);
+    fit();
+    requestAnimationFrame(frame);
+  }
+
+  window.claude?.hot?.snapshot?.(() => ({ S, clearing: !!clearing }));
+  window.claude?.hot?.ready ? window.claude.hot.ready(boot) : boot(window.claude?.hot?.data ?? {});
+})();
+</script>
+</body>
+</html>
